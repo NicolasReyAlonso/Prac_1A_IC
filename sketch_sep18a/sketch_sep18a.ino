@@ -17,6 +17,7 @@ const int externalPin = 5;
 void setup() {
   SerialUSB.begin(9600);
   pinMode(externalPin, INPUT_PULLUP); 
+  attachInterrupt(digitalPinToInterrupt(externalPin), externalCallback, FALLING);
   pinMode(LORA_RESET, OUTPUT);    // Declaramos LORA reset pin como salida
   digitalWrite(LORA_RESET, LOW);  // Lo ponemos a nivel bajo para desactivar el módulo 
   while(!SerialUSB) {;}
@@ -58,8 +59,14 @@ void loop() {
   rtc.standbyMode();   // duerme hasta la alarma
   if (_rtcFlag) {
     _rtcFlag = 0;
-    printDateTime();   
+    printDateTime(false);   // false → RTC
   }
+
+  if (_pinFlag) {
+    _pinFlag = 0;
+    printDateTime(true);    // true → interrupción externa
+  }
+
   SerialUSB.begin(9600);
   SerialUSB.print("Iter ");
   SerialUSB.println(i, DEC);
@@ -122,18 +129,30 @@ void alarmCallback() {
   _rtcFlag = 1;
 }
 
-void printDateTime() {
+void externalCallback() {
+  _pinFlag = 1;
+}
+
+
+void printDateTime(bool fromExternal) {
   const char *weekDay[7] = { "Sun", "Mon", "Tue", "Wed", "Thr", "Fri", "Sat" };
   time_t epoch = rtc.getEpoch();
   struct tm stm;
   gmtime_r(&epoch, &stm);
   char dateTime[32];
 
-  snprintf(dateTime, sizeof(dateTime), "%s %4u/%02u/%02u %02u:%02u:%02u\n",
+  if (fromExternal) {
+    snprintf(dateTime, sizeof(dateTime), "[EXT] %s %4u/%02u/%02u %02u:%02u:%02u\n",
+             weekDay[stm.tm_wday],
+             stm.tm_year + 1900, stm.tm_mon + 1, stm.tm_mday,
+             stm.tm_hour, stm.tm_min, stm.tm_sec);
+  } else {
+    snprintf(dateTime, sizeof(dateTime), "%s %4u/%02u/%02u %02u:%02u:%02u\n",
            weekDay[stm.tm_wday],
            stm.tm_year + 1900, stm.tm_mon + 1, stm.tm_mday,
            stm.tm_hour, stm.tm_min, stm.tm_sec);
-  writeInMem(dateTime);
+    writeInMem(dateTime);
+  }
 }
 bool writeInMem(char* data_line){
     File file = filesystem.open(filename, READ_WRITE);
