@@ -1,6 +1,7 @@
 #include <time.h>
 #include <RTCZero.h>
 #include <Arduino_MKRMEM.h>
+#include <ArduinoLowPower.h>
 
 #define N 10  //Numero de iteraciones antes de mostrar por pantalla el contenido de la memoria
 
@@ -17,7 +18,7 @@ const int externalPin = 5;
 void setup() {
   SerialUSB.begin(9600);
   pinMode(externalPin, INPUT_PULLUP); 
-  attachInterrupt(digitalPinToInterrupt(externalPin), externalCallback, FALLING);
+  LowPower.attachInterruptWakeup(externalPin, externalCallback, FALLING); 
   pinMode(LORA_RESET, OUTPUT);    // Declaramos LORA reset pin como salida
   digitalWrite(LORA_RESET, LOW);  // Lo ponemos a nivel bajo para desactivar el módulo 
   while(!SerialUSB) {;}
@@ -32,7 +33,10 @@ void setup() {
   if(res != SPIFFS_OK && res != SPIFFS_ERR_NOT_A_FS) {
     SerialUSB.println("mount() failed with error code "); 
     SerialUSB.println(res); 
-    exit(EXIT_FAILURE);
+    while(1) {
+      SerialUSB.println("Fatal error, halted.");
+      delay(1000);
+    }
   }
     SerialUSB.println("Opening or creating file");
   File file = filesystem.open(filename,  CREATE | READ_WRITE);
@@ -45,38 +49,39 @@ void setup() {
   file.close();
   SerialUSB.println("Reading filecontents");
   readFileContents();
-  setPeriodicAlarm(_period_sec, 10);
-  rtc.attachInterrupt(alarmCallback);
-  SerialUSB.println("Entering standby...");
-  SerialUSB.end();
-
-  
+  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, alarmCallback, CHANGE);
+  setPeriodicAlarm(_period_sec, 5);
 
 }
 
 void loop() {
-
-  rtc.standbyMode();   // duerme hasta la alarma
   if (_rtcFlag) {
     _rtcFlag = 0;
-    printDateTime(false);   // false → RTC
+    while (!SerialUSB);
+    printDateTime(false);   
   }
 
   if (_pinFlag) {
     _pinFlag = 0;
-    printDateTime(true);    // true → interrupción externa
+    while (!SerialUSB);
+    printDateTime(true);   
   }
 
-  SerialUSB.begin(9600);
+  // Mensajes de depuración
+  while (!SerialUSB);
   SerialUSB.print("Iter ");
   SerialUSB.println(i, DEC);
-  if (i >= 10){
+  if (i >= 10) {
     i = 0;
     readFileContents();
   }
-  SerialUSB.end();
-  i = i+1;
+  i++;
+
+  // Programa siguiente alarma y duerme
   rtc.setAlarmEpoch(rtc.getEpoch() + _period_sec);
+  SerialUSB.end();
+  LowPower.sleep();
+  SerialUSB.begin(9600);
 }
 void readFileContents(){
   File file = filesystem.open(filename, READ_WRITE);
@@ -133,7 +138,6 @@ void externalCallback() {
   _pinFlag = 1;
 }
 
-
 void printDateTime(bool fromExternal) {
   const char *weekDay[7] = { "Sun", "Mon", "Tue", "Wed", "Thr", "Fri", "Sat" };
   time_t epoch = rtc.getEpoch();
@@ -147,15 +151,21 @@ void printDateTime(bool fromExternal) {
              stm.tm_year + 1900, stm.tm_mon + 1, stm.tm_mday,
              stm.tm_hour, stm.tm_min, stm.tm_sec);
   } else {
-    snprintf(dateTime, sizeof(dateTime), "%s %4u/%02u/%02u %02u:%02u:%02u\n",
+  snprintf(dateTime, sizeof(dateTime), "%s %4u/%02u/%02u %02u:%02u:%02u\n",
            weekDay[stm.tm_wday],
            stm.tm_year + 1900, stm.tm_mon + 1, stm.tm_mday,
            stm.tm_hour, stm.tm_min, stm.tm_sec);
-    writeInMem(dateTime);
   }
+  writeInMem(dateTime);
 }
 bool writeInMem(char* data_line){
     File file = filesystem.open(filename, READ_WRITE);
+    if (!file) {
+      SerialUSB.print("Open file ");
+      SerialUSB.print(filename);
+      SerialUSB.print(" failed. Aborting ...");
+      on_exit_with_error_do();
+    }
     file.lseek(0, END);
     int const bytes_to_write = strlen(data_line);
     int const bytes_written = file.write((void *)data_line, bytes_to_write);
@@ -171,5 +181,8 @@ bool writeInMem(char* data_line){
 void on_exit_with_error_do()
 {
   filesystem.unmount();
-  exit(EXIT_FAILURE);
+  while(1) {
+    SerialUSB.println("Fatal error, halted.");
+    delay(1000);
+  }
 }
