@@ -10,6 +10,7 @@ volatile uint32_t _period_sec = 10;
 volatile uint8_t _rtcFlag = 0;
 volatile uint8_t _pinFlag = 0;
 volatile uint8_t i = 0;
+volatile uint32_t nextAlarm;
 
 Arduino_W25Q16DV flash(SPI1, FLASH_CS);
 char filename[] = "Hora.txt";
@@ -51,6 +52,9 @@ void setup() {
   readFileContents();
   LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, alarmCallback, CHANGE);
   setPeriodicAlarm(_period_sec, 5);
+  nextAlarm = rtc.getEpoch() + _period_sec;
+  rtc.setAlarmEpoch(nextAlarm);
+  rtc.enableAlarm(rtc.MATCH_YYMMDDHHMMSS);
 
 }
 
@@ -58,27 +62,27 @@ void loop() {
   if (_rtcFlag) {
     _rtcFlag = 0;
     while (!SerialUSB);
-    printDateTime(false);   
+    printDateTime(false, rtc.getEpoch());
+    // Mensajes de depuración
+    while (!SerialUSB);
+    SerialUSB.print("Iter ");
+    SerialUSB.println(i, DEC);
+    if (i >= 10) {
+      i = 0;
+      readFileContents();
+    }
+    i++;
+    // Siguiente alarma fija cada 10 s exactos
+    nextAlarm += _period_sec;
+    rtc.setAlarmEpoch(nextAlarm);   
   }
 
   if (_pinFlag) {
     _pinFlag = 0;
     while (!SerialUSB);
-    printDateTime(true);   
+    printDateTime(true, rtc.getEpoch());   
   }
 
-  // Mensajes de depuración
-  while (!SerialUSB);
-  SerialUSB.print("Iter ");
-  SerialUSB.println(i, DEC);
-  if (i >= 10) {
-    i = 0;
-    readFileContents();
-  }
-  i++;
-
-  // Programa siguiente alarma y duerme
-  rtc.setAlarmEpoch(rtc.getEpoch() + _period_sec);
   SerialUSB.end();
   LowPower.sleep();
   SerialUSB.begin(9600);
@@ -138,9 +142,8 @@ void externalCallback() {
   _pinFlag = 1;
 }
 
-void printDateTime(bool fromExternal) {
+void printDateTime(bool fromExternal, time_t epoch) {
   const char *weekDay[7] = { "Sun", "Mon", "Tue", "Wed", "Thr", "Fri", "Sat" };
-  time_t epoch = rtc.getEpoch();
   struct tm stm;
   gmtime_r(&epoch, &stm);
   char dateTime[32];
