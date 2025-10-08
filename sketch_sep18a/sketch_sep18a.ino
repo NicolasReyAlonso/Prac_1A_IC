@@ -1,3 +1,5 @@
+//José Manuel Díaz Hernández y Nicolás Rey Alonso, Práctica 1A, IC 2025
+
 #include <time.h>
 #include <RTCZero.h>
 #include <Arduino_MKRMEM.h>
